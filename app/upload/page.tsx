@@ -322,13 +322,14 @@ export default function UploadPage() {
   const handleFile = async (file: File) => {
     console.log("🔍 handleFile called with file:", file.name, file.size, file.type)
 
-    if (!file.name.toLowerCase().endsWith(".zip")) {
-      console.log("❌ File rejected: not a ZIP file")
+    const lowerName = file.name.toLowerCase()
+    if (!lowerName.endsWith(".zip") && !lowerName.endsWith(".7z") && !lowerName.endsWith(".rar")) {
+      console.log("❌ File rejected: not a supported archive")
       setUploadStatus({
         status: "error",
-        message: "Only .zip files are allowed",
+        message: "Only .zip, .7z, and .rar files are allowed",
         progress: 0,
-        errorDetails: "Please select a valid ZIP file containing stealer logs data.",
+        errorDetails: "Please select a valid .zip, .7z, or .rar file containing stealer logs data.",
       })
       return
     }
@@ -532,9 +533,6 @@ export default function UploadPage() {
         friendlyMessage = "Incorrect password."
         errorDetails = "The password doesn't match this archive. Please check it and try again."
         passwordNeeded = true
-      } else if (rawMessage.includes("STREAMING_PASSWORD_NOT_SUPPORTED")) {
-        friendlyMessage = "Password-protected archives over 500 MB are not supported."
-        errorDetails = "Please remove the password or split the archive before uploading files larger than 500 MB."
       }
 
       setUploadStatus({
@@ -665,10 +663,10 @@ export default function UploadPage() {
 
         <Card className="glass-card border-border/50">
           <CardHeader>
-            <CardTitle className="text-foreground">Upload ZIP File</CardTitle>
+            <CardTitle className="text-foreground">Upload Archive File</CardTitle>
             <CardDescription className="text-muted-foreground">
-              Upload a .zip file containing stealer logs data. The system will automatically extract both text and
-              binary files, with duplicate device detection.
+              Upload a .zip, .7z, or .rar file containing stealer logs data. The system will automatically extract
+              both text and binary files, with duplicate device detection.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -753,7 +751,7 @@ export default function UploadPage() {
               >
                 <FileArchive className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
                 <div className="space-y-2">
-                  <p className="text-lg font-medium text-foreground">Drop your .zip file here</p>
+                  <p className="text-lg font-medium text-foreground">Drop your .zip, .7z, or .rar file here</p>
                   <p className="text-sm text-muted-foreground">or click to browse</p>
                 </div>
                 <Button
@@ -763,7 +761,7 @@ export default function UploadPage() {
                   <Upload className="mr-2 h-4 w-4" />
                   Select File
                 </Button>
-                <input ref={fileInputRef} type="file" accept=".zip" onChange={handleFileInput} className="hidden" />
+                <input ref={fileInputRef} type="file" accept=".zip,.7z,.rar" onChange={handleFileInput} className="hidden" />
               </div>
             )}
 

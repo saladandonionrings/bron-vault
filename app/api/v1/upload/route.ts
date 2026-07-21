@@ -18,6 +18,7 @@ import { mkdir } from "fs/promises"
 import { withApiKeyAuth, addRateLimitHeaders, logApiRequest } from "@/lib/api-key-auth"
 import { createUploadJob, startUploadJob, completeUploadJob, failUploadJob, addUploadJobLog, updateUploadJob } from "@/lib/upload-job-manager"
 import { processFileUploadFromPath } from "@/lib/upload/file-upload-processor"
+import { detectArchiveType } from "@/lib/upload/archive-extractor"
 import { createImportLog, updateImportLog, logUploadAction } from "@/lib/audit-log"
 import { executeQuery } from "@/lib/mysql"
 import { settingsManager } from "@/lib/settings"
@@ -223,13 +224,12 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate file type
-    const fileName = file.name.toLowerCase()
-    if (!fileName.endsWith('.zip')) {
+    if (!detectArchiveType(file.name)) {
       return NextResponse.json(
-        { 
-          success: false, 
-          error: "Only ZIP files are supported", 
-          code: "INVALID_FILE_TYPE" 
+        {
+          success: false,
+          error: "Only .zip, .7z, and .rar files are supported",
+          code: "INVALID_FILE_TYPE"
         },
         { status: 400 }
       )

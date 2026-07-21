@@ -1,23 +1,34 @@
 # Install dependencies only when needed
-FROM node:20-alpine AS deps
+FROM node:20-slim AS deps
 WORKDIR /app
 COPY package.json ./
 RUN yarn install --frozen-lockfile
 
 # Rebuild the source code only when needed
-FROM node:20-alpine AS builder
+FROM node:20-slim AS builder
 WORKDIR /app
 COPY . .
 COPY --from=deps /app/node_modules ./node_modules
 RUN yarn build
 
 # Production image using standalone output for smaller size
-FROM node:20-alpine AS runner
+FROM node:20-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 
+# Archive extraction tools for password-protected .zip/.7z/.rar uploads.
+# unrar lives in Debian's non-free component, which isn't enabled by default.
+RUN if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+      sed -i 's/^Components: .*/Components: main contrib non-free non-free-firmware/' /etc/apt/sources.list.d/debian.sources; \
+    elif [ -f /etc/apt/sources.list ]; then \
+      sed -i 's/ main$/ main contrib non-free non-free-firmware/' /etc/apt/sources.list; \
+    fi \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends p7zip-full unrar \
+    && rm -rf /var/lib/apt/lists/*
+
 # Fixed non-root user (best practice: do not depend on host UID/GID or sudo)
-RUN addgroup -g 1001 -S nodejs && adduser -S -u 1001 -G nodejs nextjs
+RUN groupadd --gid 1001 nodejs && useradd --uid 1001 --gid nodejs --system --no-create-home nextjs
 
 # Copy only necessary files for standalone deployment
 # Use --chown directly on COPY to set ownership immediately
