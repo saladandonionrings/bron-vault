@@ -1,5 +1,3 @@
-import JSZip from "jszip"
-
 export interface ZipStructureInfo {
   hasPreDirectory: boolean
   preDirectoryName: string | null
@@ -10,8 +8,22 @@ export interface ZipStructureInfo {
   filteredDirectories: string[]
 }
 
-export function analyzeZipStructureWithMacOSSupport(zipData: JSZip): ZipStructureInfo {
-  const allPaths = Object.keys(zipData.files).filter((path) => !zipData.files[path].dir)
+const SYSTEM_DIRECTORIES = new Set([
+  "__MACOSX", // macOS metadata
+  ".DS_Store", // macOS metadata
+  "Thumbs.db", // Windows metadata
+  ".Trashes", // macOS trash
+  ".fseventsd", // macOS file system events
+  ".Spotlight-V100", // macOS Spotlight
+  ".TemporaryItems", // macOS temp
+  "System Volume Information", // Windows system
+])
+
+/**
+ * Analyze archive structure from a flat list of file paths (works for any archive
+ * format - zip, 7z, rar - since extraction always produces a plain directory tree).
+ */
+export function analyzeZipStructureFromPaths(allPaths: string[]): ZipStructureInfo {
   const samplePaths = allPaths.slice(0, 10)
 
   console.log(`🔍 Analyzing structure from ${allPaths.length} files`)
@@ -20,8 +32,8 @@ export function analyzeZipStructureWithMacOSSupport(zipData: JSZip): ZipStructur
   const depthCounts = new Map<number, number>()
   const firstLevelDirs = new Set<string>()
 
-  for (const path of allPaths) {
-    const parts = path.split("/").filter((p) => p.length > 0)
+  for (const filePath of allPaths) {
+    const parts = filePath.split("/").filter((p) => p.length > 0)
     const depth = parts.length
 
     depthCounts.set(depth, (depthCounts.get(depth) || 0) + 1)
@@ -34,36 +46,22 @@ export function analyzeZipStructureWithMacOSSupport(zipData: JSZip): ZipStructur
   console.log(`📊 Depth analysis:`, Object.fromEntries(depthCounts))
   console.log(`📁 First level directories (${firstLevelDirs.size}):`, Array.from(firstLevelDirs).slice(0, 10))
 
-  // FILTER OUT SYSTEM DIRECTORIES AND FILES
-  const systemDirectories = new Set([
-    "__MACOSX", // macOS metadata
-    ".DS_Store", // macOS metadata
-    "Thumbs.db", // Windows metadata
-    ".Trashes", // macOS trash
-    ".fseventsd", // macOS file system events
-    ".Spotlight-V100", // macOS Spotlight
-    ".TemporaryItems", // macOS temp
-    "System Volume Information", // Windows system
-  ])
-
   // Filter out system directories, files, and hidden items
   const filteredDirs = Array.from(firstLevelDirs).filter((dir) => {
-    // Skip system directories and files
-    if (systemDirectories.has(dir)) {
+    if (SYSTEM_DIRECTORIES.has(dir)) {
       console.log(`🚫 Filtering out system item: ${dir}`)
       return false
     }
 
-    // Skip hidden directories and files (starting with .)
     if (dir.startsWith(".")) {
       console.log(`🚫 Filtering out hidden item: ${dir}`)
       return false
     }
 
-    // Skip if it's a file (not a directory)
-    const isFile = Object.keys(zipData.files).some(path => {
-      const parts = path.split("/").filter(p => p.length > 0)
-      return parts.length === 1 && parts[0] === dir && !zipData.files[path].dir
+    // Check if it's a file (not a directory) by checking if any path has this as the only part
+    const isFile = allPaths.some((p) => {
+      const parts = p.split("/").filter((part) => part.length > 0)
+      return parts.length === 1 && parts[0] === dir
     })
 
     if (isFile) {
@@ -76,14 +74,13 @@ export function analyzeZipStructureWithMacOSSupport(zipData: JSZip): ZipStructur
 
   const macOSDetected = firstLevelDirs.has("__MACOSX")
   if (macOSDetected) {
-    console.log(`🍎 macOS ZIP detected! Filtering out __MACOSX directory`)
+    console.log(`🍎 macOS archive detected! Filtering out __MACOSX directory`)
   }
 
   console.log(`📁 Filtered directories (${filteredDirs.length}):`, filteredDirs)
 
   // Determine structure type based on FILTERED directories
   if (filteredDirs.length === 1) {
-    // Only one real directory after filtering - PRE-DIRECTORY structure
     const preDir = filteredDirs[0]
     console.log(`🎯 Detected PRE-DIRECTORY structure with: "${preDir}" (macOS: ${macOSDetected})`)
 
@@ -97,7 +94,6 @@ export function analyzeZipStructureWithMacOSSupport(zipData: JSZip): ZipStructur
       filteredDirectories: filteredDirs,
     }
   } else if (filteredDirs.length > 10) {
-    // Many directories after filtering - DIRECT DEVICE structure
     console.log(`🎯 Detected DIRECT DEVICE structure with ${filteredDirs.length} devices (macOS: ${macOSDetected})`)
 
     return {
@@ -110,7 +106,6 @@ export function analyzeZipStructureWithMacOSSupport(zipData: JSZip): ZipStructur
       filteredDirectories: filteredDirs,
     }
   } else {
-    // Mixed or nested structure
     console.log(`🎯 Detected NESTED/MIXED structure with ${filteredDirs.length} directories (macOS: ${macOSDetected})`)
 
     return {
