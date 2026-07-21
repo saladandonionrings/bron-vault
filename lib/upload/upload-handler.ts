@@ -20,6 +20,7 @@ export async function handleUploadRequest(request: NextRequest): Promise<NextRes
 
   const formData = await request.formData()
   const sessionId = (formData.get("sessionId") as string) || "default"
+  const password = (formData.get("password") as string) || undefined
 
   // Helper function for logging with broadcast
   const logWithBroadcast = (message: string, type: "info" | "success" | "warning" | "error" = "info") => {
@@ -102,7 +103,7 @@ export async function handleUploadRequest(request: NextRequest): Promise<NextRes
     }
 
     // Process file upload
-    const result = await processFileUpload(file, sessionId, logWithProgressUpdate)
+    const result = await processFileUpload(file, sessionId, logWithProgressUpdate, password)
 
     // Close log session
     setTimeout(() => closeLogSession(sessionId), 1000)

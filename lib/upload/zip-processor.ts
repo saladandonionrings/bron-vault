@@ -4,6 +4,7 @@ import path from "path"
 import { executeQuery } from "@/lib/mysql"
 import crypto from "crypto"
 import JSZip from "jszip"
+import AdmZip from "adm-zip"
 import {
   analyzeZipStructureWithMacOSSupport,
   extractDeviceNameWithMacOSSupport,
@@ -11,6 +12,38 @@ import {
 } from "./zip-structure-analyzer"
 import { processDevice, type DeviceProcessingResult } from "./device-processor"
 import { checkMonitorsForBatch } from "@/lib/domain-monitor"
+
+/**
+ * Decrypt a password-protected ZIP into a plain (unencrypted) ZIP buffer.
+ * JSZip cannot read encrypted entries at all, so we use adm-zip (which supports
+ * classic ZipCrypto encryption) to decrypt each entry and repack them into a
+ * fresh archive that JSZip can then load normally.
+ *
+ * Note: adm-zip only supports ZipCrypto, not WinZip/7-Zip AES-256 encryption.
+ */
+function decryptZipToBuffer(sourceBuffer: Buffer, password: string): Buffer {
+  const sourceZip = new AdmZip(sourceBuffer)
+  const decryptedZip = new AdmZip()
+
+  for (const entry of sourceZip.getEntries()) {
+    if (entry.isDirectory) continue
+
+    let data: Buffer
+    try {
+      // @types/adm-zip is missing the `pass` param that getData() actually supports at runtime
+      data = (entry.getData as (pass?: string) => Buffer)(password)
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error)
+      if (errorMsg.includes("Wrong Password") || errorMsg.includes("CRC32")) {
+        throw new Error("INCORRECT_PASSWORD")
+      }
+      throw error
+    }
+    decryptedZip.addFile(entry.entryName, data)
+  }
+
+  return decryptedZip.toBuffer()
+}
 
 export interface ProcessingResult {
   devicesFound: number
@@ -31,6 +64,7 @@ export async function processZipWithBinaryStorage(
   arrayBuffer: ArrayBuffer,
   uploadBatch: string,
   logWithBroadcast: (message: string, type?: "info" | "success" | "warning" | "error") => void,
+  password?: string,
 ): Promise<ProcessingResult> {
   try {
     const fileSizeMB = (arrayBuffer.byteLength / (1024 * 1024)).toFixed(2)
@@ -47,11 +81,37 @@ export async function processZipWithBinaryStorage(
       logWithBroadcast(`✅ ZIP loaded successfully, total entries: ${Object.keys(zipData.files).length}`, "success")
     } catch (zipLoadError) {
       const errorMsg = zipLoadError instanceof Error ? zipLoadError.message : String(zipLoadError)
-      logWithBroadcast(`❌ Failed to load ZIP file: ${errorMsg}`, "error")
-      if (zipLoadError instanceof Error && zipLoadError.stack) {
-        logWithBroadcast(`📋 Error stack: ${zipLoadError.stack}`, "error")
+
+      if (errorMsg.toLowerCase().includes("encrypted")) {
+        if (!password) {
+          logWithBroadcast("🔒 Archive is password-protected, no password provided", "warning")
+          throw new Error("PASSWORD_REQUIRED")
+        }
+
+        logWithBroadcast("🔑 Archive is password-protected, attempting to decrypt...", "info")
+        try {
+          const decryptedBuffer = decryptZipToBuffer(Buffer.from(arrayBuffer), password)
+          zipData = await zip.loadAsync(decryptedBuffer)
+          logWithBroadcast(
+            `✅ ZIP decrypted and loaded successfully, total entries: ${Object.keys(zipData.files).length}`,
+            "success",
+          )
+        } catch (decryptError) {
+          const decryptErrorMsg = decryptError instanceof Error ? decryptError.message : String(decryptError)
+          if (decryptErrorMsg === "INCORRECT_PASSWORD") {
+            logWithBroadcast("❌ Incorrect password provided for encrypted archive", "error")
+            throw new Error("INCORRECT_PASSWORD")
+          }
+          logWithBroadcast(`❌ Failed to decrypt ZIP file: ${decryptErrorMsg}`, "error")
+          throw new Error(`Failed to decrypt ZIP file: ${decryptErrorMsg}`)
+        }
+      } else {
+        logWithBroadcast(`❌ Failed to load ZIP file: ${errorMsg}`, "error")
+        if (zipLoadError instanceof Error && zipLoadError.stack) {
+          logWithBroadcast(`📋 Error stack: ${zipLoadError.stack}`, "error")
+        }
+        throw new Error(`Failed to load ZIP file: ${errorMsg}`)
       }
-      throw new Error(`Failed to load ZIP file: ${errorMsg}`)
     }
 
     logWithBroadcast(`📦 ZIP loaded successfully, total entries: ${Object.keys(zipData.files).length}`, "info")

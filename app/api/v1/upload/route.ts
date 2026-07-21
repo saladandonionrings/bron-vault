@@ -73,6 +73,7 @@ async function processUploadFromPathWithJob(
   originalFileName: string,
   _fileSize: number,
   _apiKeyId: string,
+  password?: string,
 ): Promise<void> {
   try {
     await startUploadJob(jobId)
@@ -116,6 +117,7 @@ async function processUploadFromPathWithJob(
       jobId,
       logWithJobUpdate,
       true, // deleteAfterProcessing: processor will delete file when done
+      password,
     )
 
     if (result.success) {
@@ -207,7 +209,8 @@ export async function POST(request: NextRequest) {
     // Get form data
     const formData = await request.formData()
     const file = formData.get("file") as File
-    
+    const password = (formData.get("password") as string) || undefined
+
     if (!file) {
       return NextResponse.json(
         { 
@@ -317,7 +320,7 @@ export async function POST(request: NextRequest) {
 
     const uploadLimit = await getUploadLimit()
     void uploadLimit(() =>
-      processUploadFromPathWithJob(jobId!, tempFilePath, originalName, file.size, payload.keyId),
+      processUploadFromPathWithJob(jobId!, tempFilePath, originalName, file.size, payload.keyId, password),
     )
 
     const response = NextResponse.json({
