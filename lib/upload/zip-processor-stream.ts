@@ -220,6 +220,7 @@ export async function processZipStream(
   filePath: string,
   uploadBatch: string,
   logWithBroadcast: (message: string, type?: "info" | "success" | "warning" | "error") => void,
+  password?: string,
 ): Promise<ProcessingResult> {
   let zipfile2: yauzl.ZipFile | null = null
   try {
@@ -245,6 +246,7 @@ export async function processZipStream(
 
     const allPaths: string[] = []
     const entryMap = new Map<string, yauzl.Entry>()
+    let hasEncryptedEntry = false
 
     await new Promise<void>((resolve, reject) => {
       zipfile.readEntry()
@@ -255,13 +257,17 @@ export async function processZipStream(
           .replace(/\\/g, "/")
           .replace(/^\/+/, "")
           .split("/").filter((p: string) => p !== ".." && p !== ".").join("/")
-        
+
+        if (entry.isEncrypted()) {
+          hasEncryptedEntry = true
+        }
+
         if (!entry.fileName.endsWith("/")) {
           // Only add files, not directories
           allPaths.push(normalizedPath)
           entryMap.set(normalizedPath, entry)
         }
-        
+
         zipfile.readEntry()
       })
       zipfile.on("end", () => {
@@ -271,6 +277,23 @@ export async function processZipStream(
       })
       zipfile.on("error", reject)
     })
+
+    if (hasEncryptedEntry) {
+      // yauzl (streaming) cannot decrypt entries - decrypting would require loading
+      // the whole archive into memory, defeating the purpose of the >500MB streaming path.
+      logWithBroadcast(
+        password
+          ? "🔒 Archive is password-protected, but files over 500 MB don't support password decryption yet"
+          : "🔒 Archive is password-protected - not supported in streaming mode (>500MB)",
+        "warning",
+      )
+      try {
+        zipfile.close()
+      } catch (_closeError) {
+        // Ignore close errors
+      }
+      throw new Error("STREAMING_PASSWORD_NOT_SUPPORTED")
+    }
 
     // Analyze structure
     const structureInfo = analyzeZipStructureFromPaths(allPaths)

@@ -248,7 +248,8 @@ export async function uploadFileInChunks(
 export async function assembleAndProcessFile(
   fileId: string,
   fileName: string,
-  sessionId: string
+  sessionId: string,
+  password?: string,
 ): Promise<{ success: boolean; details?: any; error?: string }> {
   console.log(`🔧 Assembling file from chunks: ${fileId} (${fileName})`)
   try {
@@ -261,6 +262,7 @@ export async function assembleAndProcessFile(
         fileId,
         fileName,
         sessionId,
+        password,
       }),
     })
 
@@ -274,7 +276,7 @@ export async function assembleAndProcessFile(
     } else {
       return {
         success: false,
-        error: result.error || result.details || "Failed to assemble and process file",
+        error: result.details || result.error || "Failed to assemble and process file",
       }
     }
   } catch (error) {

@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 
 import type React from "react"
 import { useState, useRef, useEffect } from "react"
-import { Upload, FileArchive, CheckCircle, AlertCircle, Info, SkipForward, HardDrive, Monitor, X, ShieldAlert, Activity, Loader2, ChevronRight } from "lucide-react"
+import { Upload, FileArchive, CheckCircle, AlertCircle, Info, SkipForward, HardDrive, Monitor, X, ShieldAlert, Activity, Loader2, ChevronRight, Lock, Eye, EyeOff } from "lucide-react"
 import { uploadFileInChunks, assembleAndProcessFile } from "@/lib/upload/chunk-uploader"
 import { formatBytes } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -14,6 +14,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
+import { Input } from "@/components/ui/input"
 import { useAuth, isAdmin } from "@/hooks/useAuth"
 import { useToast } from "@/hooks/use-toast"
 import Link from "next/link"
@@ -36,6 +37,7 @@ interface UploadStatus {
     skippedDevices: string[]
   }
   errorDetails?: string
+  passwordNeeded?: boolean
 }
 
 interface LogEntry {
@@ -57,6 +59,12 @@ export default function UploadPage() {
   })
   const [dragActive, setDragActive] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Archive password support - many stealer log archives are password-protected
+  const [password, setPassword] = useState("")
+  const [showPassword, setShowPassword] = useState(false)
+  // Keep the selected file around so the user can retry with a password without re-selecting it
+  const [pendingFile, setPendingFile] = useState<File | null>(null)
 
   // Add new state:
   const [logs, setLogs] = useState<LogEntry[]>([])
@@ -349,6 +357,9 @@ export default function UploadPage() {
 
     console.log("✅ File accepted, proceeding with upload")
 
+    // Remember the file so we can retry with a password without asking the user to re-select it
+    setPendingFile(file)
+
     // Create new AbortController for this upload
     abortControllerRef.current = new AbortController()
     const signal = abortControllerRef.current.signal
@@ -441,7 +452,7 @@ export default function UploadPage() {
           progress: 100,
         })
 
-        const processResult = await assembleAndProcessFile(uploadResult.fileId, file.name, sessionId)
+        const processResult = await assembleAndProcessFile(uploadResult.fileId, file.name, sessionId, password || undefined)
 
         if (!processResult.success) {
           throw new Error(processResult.error || "Failed to process file")
@@ -467,6 +478,9 @@ export default function UploadPage() {
         const formData = new FormData()
         formData.append("file", file)
         formData.append("sessionId", sessionId)
+        if (password) {
+          formData.append("password", password)
+        }
 
       const response = await fetch("/api/upload", {
         method: "POST",
@@ -500,14 +514,35 @@ export default function UploadPage() {
       }
 
       console.error("Upload error:", error)
+
+      const rawMessage =
+        error instanceof Error
+          ? error.message
+          : "An unexpected error occurred during upload. Please check your file and try again."
+
+      let friendlyMessage = "Upload failed. Please try again."
+      let errorDetails = rawMessage
+      let passwordNeeded = false
+
+      if (rawMessage.includes("PASSWORD_REQUIRED")) {
+        friendlyMessage = "This archive is password protected."
+        errorDetails = "Enter the archive's password below, then retry the upload."
+        passwordNeeded = true
+      } else if (rawMessage.includes("INCORRECT_PASSWORD")) {
+        friendlyMessage = "Incorrect password."
+        errorDetails = "The password doesn't match this archive. Please check it and try again."
+        passwordNeeded = true
+      } else if (rawMessage.includes("STREAMING_PASSWORD_NOT_SUPPORTED")) {
+        friendlyMessage = "Password-protected archives over 500 MB are not supported."
+        errorDetails = "Please remove the password or split the archive before uploading files larger than 500 MB."
+      }
+
       setUploadStatus({
         status: "error",
-        message: "Upload failed. Please try again.",
+        message: friendlyMessage,
         progress: 0,
-        errorDetails:
-          error instanceof Error
-            ? error.message
-            : "An unexpected error occurred during upload. Please check your file and try again.",
+        errorDetails,
+        passwordNeeded,
       })
     } finally {
       // Close log stream after a delay
@@ -544,8 +579,16 @@ export default function UploadPage() {
     })
     setLogs([]) // Clear logs
     setLogSessionId("") // Clear session ID
+    setPassword("")
+    setPendingFile(null)
     if (fileInputRef.current) {
       fileInputRef.current.value = ""
+    }
+  }
+
+  const retryWithPassword = () => {
+    if (pendingFile) {
+      handleFile(pendingFile)
     }
   }
 
@@ -721,6 +764,37 @@ export default function UploadPage() {
                   Select File
                 </Button>
                 <input ref={fileInputRef} type="file" accept=".zip" onChange={handleFileInput} className="hidden" />
+              </div>
+            )}
+
+            {uploadStatus.status === "idle" && (
+              <div className="space-y-2">
+                <Label htmlFor="archive-password" className="text-sm font-medium text-foreground flex items-center gap-2">
+                  <Lock className="h-4 w-4 text-muted-foreground" />
+                  Archive password (optional)
+                </Label>
+                <div className="relative">
+                  <Input
+                    id="archive-password"
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Leave empty if the archive isn't password protected"
+                    className="pr-10"
+                    autoComplete="off"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                    tabIndex={-1}
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Some stealer log archives are protected with a password. Enter it here so it can be decrypted during processing.
+                </p>
               </div>
             )}
 
@@ -977,13 +1051,54 @@ export default function UploadPage() {
                     </div>
                   )}
                 </div>
-                <Button
-                  onClick={resetUpload}
-                  variant="outline"
-                  className="glass border-border text-foreground hover:bg-secondary"
-                >
-                  Try Again
-                </Button>
+
+                {uploadStatus.passwordNeeded && pendingFile && (
+                  <div className="space-y-2">
+                    <Label htmlFor="retry-archive-password" className="text-sm font-medium text-foreground flex items-center gap-2">
+                      <Lock className="h-4 w-4 text-muted-foreground" />
+                      Archive password
+                    </Label>
+                    <div className="relative">
+                      <Input
+                        id="retry-archive-password"
+                        type={showPassword ? "text" : "password"}
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        placeholder="Enter the archive password"
+                        className="pr-10"
+                        autoComplete="off"
+                        autoFocus
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                        tabIndex={-1}
+                      >
+                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2">
+                  {uploadStatus.passwordNeeded && pendingFile && (
+                    <Button
+                      onClick={retryWithPassword}
+                      disabled={!password}
+                      className="bg-primary hover:bg-primary-hover text-white"
+                    >
+                      Retry Upload
+                    </Button>
+                  )}
+                  <Button
+                    onClick={resetUpload}
+                    variant="outline"
+                    className="glass border-border text-foreground hover:bg-secondary"
+                  >
+                    {uploadStatus.passwordNeeded ? "Upload a Different File" : "Try Again"}
+                  </Button>
+                </div>
               </div>
             )}
           </CardContent>

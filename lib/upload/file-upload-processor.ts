@@ -20,6 +20,7 @@ export async function processFileUpload(
   file: File,
   sessionId: string,
   logWithBroadcast: (message: string, type?: "info" | "success" | "warning" | "error") => void,
+  password?: string,
 ): Promise<FileUploadResult> {
   let uploadedFilePath: string | null = null
 
@@ -58,7 +59,8 @@ export async function processFileUpload(
       file.name,
       sessionId,
       logWithBroadcast,
-      true // deleteAfterProcessing = true (original behavior)
+      true, // deleteAfterProcessing = true (original behavior)
+      password,
     )
   } catch (error) {
     logWithBroadcast("💥 Upload processing error:" + error, "error")
@@ -96,6 +98,7 @@ export async function processFileUploadFromPath(
   sessionId: string,
   logWithBroadcast: (message: string, type?: "info" | "success" | "warning" | "error") => void,
   deleteAfterProcessing: boolean = false,
+  password?: string,
 ): Promise<FileUploadResult> {
   try {
     await initializeDatabase()
@@ -141,7 +144,7 @@ export async function processFileUploadFromPath(
       logWithBroadcast("🚀 Starting ZIP stream processing...", "info")
       try {
         // Panggil fungsi baru yang berbasis Stream/Yauzl
-        processingResult = await processZipStream(filePath, uploadBatch, logWithBroadcast)
+        processingResult = await processZipStream(filePath, uploadBatch, logWithBroadcast, password)
         logWithBroadcast("✅ ZIP processing completed successfully", "success")
       } catch (processError) {
         const errorMsg = processError instanceof Error ? processError.message : String(processError)
@@ -192,7 +195,7 @@ export async function processFileUploadFromPath(
       // Process the zip file with enhanced binary file storage
       logWithBroadcast("🚀 Starting ZIP processing with JSZip...", "info")
       try {
-        processingResult = await processZipWithBinaryStorage(bytes, uploadBatch, logWithBroadcast)
+        processingResult = await processZipWithBinaryStorage(bytes, uploadBatch, logWithBroadcast, password)
         logWithBroadcast("✅ ZIP processing completed successfully", "success")
       } catch (processError) {
         const errorMsg = processError instanceof Error ? processError.message : String(processError)

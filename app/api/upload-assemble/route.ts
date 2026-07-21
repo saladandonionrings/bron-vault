@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json()
-    const { fileId, fileName, sessionId } = body
+    const { fileId, fileName, sessionId, password } = body
 
     if (!fileId || !fileName) {
       return NextResponse.json(
@@ -240,7 +240,8 @@ export async function POST(request: NextRequest) {
         fileName,
         sessionId,
         logWithBroadcast,
-        true // Delete file after processing
+        true, // Delete file after processing
+        password || undefined,
       )
     } catch (processError) {
       const errorMsg = processError instanceof Error ? processError.message : String(processError)
